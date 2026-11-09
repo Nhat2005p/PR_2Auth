@@ -1,16 +1,25 @@
 import { Module } from '@nestjs/common';
-import * as path from 'path';
+import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import {
+  AcceptLanguageResolver,
+  HeaderResolver,
   I18nModule,
   QueryResolver,
-  HeaderResolver,
-  AcceptLanguageResolver,
 } from 'nestjs-i18n';
+import * as path from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
+import { dataSourceOptions } from './database/data-source';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    TypeOrmModule.forRoot(dataSourceOptions),
     I18nModule.forRoot({
       fallbackLanguage: 'en',
       loaderOptions: {
@@ -23,6 +32,8 @@ import { AppService } from './app.service';
         AcceptLanguageResolver,
       ],
     }),
+    RedisModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
