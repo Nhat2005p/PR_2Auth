@@ -1,21 +1,41 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { I18nService } from 'nestjs-i18n';
 import Redis from 'ioredis';
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
+  private readonly logger = new Logger(RedisService.name);
   private client: Redis;
-  private memoryBlacklist = new Map<string, number>();
 
-  constructor() {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly i18n: I18nService,
+  ) {
+    const host = this.configService.get<string>('REDIS_HOST', 'localhost');
+    const port = Number(this.configService.get<number>('REDIS_PORT', 6379));
+
     this.client = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: Number(process.env.REDIS_PORT) || 6379,
-      lazyConnect: true,
-      retryStrategy: () => null,
+      host,
+      port,
+      lazyConnect: false,
+      enableOfflineQueue: false,
+      retryStrategy: (times) => {
+        const delay = Math.min(times * 100, 3000);
+        this.logger.warn(
+          `Redis disconnected. Reconnecting attempt #${times} in ${delay}ms`,
+        );
+        return delay;
+      },
     });
 
-    this.client.on('error', () => {
-      // Fallback sang in-memory khi máy local chưa bật Redis server
+    this.client.on('error', (err) => {
+      this.logger.error(`Redis connection error: ${err.message}`, err.stack);
     });
   }
 
@@ -25,8 +45,13 @@ export class RedisService implements OnModuleDestroy {
 
     try {
       await this.client.set(key, '1', 'EX', ttl);
-    } catch {
-      this.memoryBlacklist.set(key, Date.now() + ttl * 1000);
+    } catch (err) {
+      this.logger.error(
+        `Failed to blacklist token in Redis: ${err.message}`,
+        err.stack,
+      );
+      const message = this.i18n.t('auth.redis_service_unavailable');
+      throw new ServiceUnavailableException(message);
     }
   }
 
@@ -35,31 +60,26 @@ export class RedisService implements OnModuleDestroy {
 
     try {
       const result = await this.client.get(key);
-      if (result) {
-        return true;
-      }
-    } catch {
-      // Ignore Redis connection error and check memory fallback
+      return result !== null;
+    } catch (err) {
+      this.logger.error(
+        `Failed to verify token in Redis blacklist: ${err.message}`,
+        err.stack,
+      );
+      const message = this.i18n.t('auth.redis_service_unavailable');
+      throw new ServiceUnavailableException(message);
     }
-
-    const expiresAt = this.memoryBlacklist.get(key);
-    if (!expiresAt) {
-      return false;
-    }
-
-    if (Date.now() > expiresAt) {
-      this.memoryBlacklist.delete(key);
-      return false;
-    }
-
-    return true;
   }
 
   async onModuleDestroy(): Promise<void> {
-    if (this.client.status === 'ready') {
-      await this.client.quit();
-    } else {
-      this.client.disconnect();
+    try {
+      if (this.client.status === 'ready') {
+        await this.client.quit();
+      } else {
+        this.client.disconnect();
+      }
+    } catch (err) {
+      this.logger.warn(`Error disconnecting Redis: ${err.message}`);
     }
   }
 }

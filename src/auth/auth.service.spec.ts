@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import * as bcrypt from 'bcryptjs';
+import { I18nService } from 'nestjs-i18n';
 import { RedisService } from '../redis/redis.service';
 import { User } from '../users/entities/user.entity';
 import { AuthService } from './auth.service';
@@ -21,7 +22,7 @@ describe('AuthService', () => {
 
   const mockUserRepository = {
     findOne: jest.fn(),
-    create: jest.fn(),
+    create: jest.fn().mockImplementation((dto) => dto),
     save: jest.fn(),
   };
 
@@ -33,6 +34,10 @@ describe('AuthService', () => {
   const mockRedisService = {
     setBlacklistToken: jest.fn(),
     isTokenBlacklisted: jest.fn(),
+  };
+
+  const mockI18nService = {
+    t: jest.fn().mockImplementation((key: string) => key),
   };
 
   beforeEach(async () => {
@@ -53,6 +58,10 @@ describe('AuthService', () => {
           provide: RedisService,
           useValue: mockRedisService,
         },
+        {
+          provide: I18nService,
+          useValue: mockI18nService,
+        },
       ],
     }).compile();
 
@@ -60,29 +69,44 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('should register a new user successfully', async () => {
+    it('should register a new user successfully and normalize email', async () => {
       mockUserRepository.findOne.mockResolvedValue(null);
-      mockUserRepository.create.mockReturnValue(mockUser);
       mockUserRepository.save.mockResolvedValue(mockUser);
 
       const result = await authService.register({
-        email: 'nhat@example.com',
+        email: '  Nhat@Example.com  ',
         name: 'Minh Nhat',
-        password: '123456',
+        password: 'password123',
       });
 
       expect(result.email).toBe('nhat@example.com');
       expect(mockUserRepository.save).toHaveBeenCalled();
     });
 
-    it('should throw ConflictException if email already exists', async () => {
+    it('should throw ConflictException if email already exists in DB check', async () => {
       mockUserRepository.findOne.mockResolvedValue(mockUser);
 
       await expect(
         authService.register({
           email: 'nhat@example.com',
           name: 'Minh Nhat',
-          password: '123456',
+          password: 'password123',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should catch database unique constraint violation and throw ConflictException', async () => {
+      mockUserRepository.findOne.mockResolvedValue(null);
+      mockUserRepository.save.mockRejectedValue({
+        code: 'ER_DUP_ENTRY',
+        errno: 1062,
+      });
+
+      await expect(
+        authService.register({
+          email: 'nhat@example.com',
+          name: 'Minh Nhat',
+          password: 'password123',
         }),
       ).rejects.toThrow(ConflictException);
     });
@@ -90,7 +114,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should return accessToken and user on valid credentials', async () => {
-      const hashedPassword = await bcrypt.hash('123456', 10);
+      const hashedPassword = await bcrypt.hash('password123', 10);
       mockUserRepository.findOne.mockResolvedValue({
         ...mockUser,
         password: hashedPassword,
@@ -98,8 +122,8 @@ describe('AuthService', () => {
       mockJwtService.signAsync.mockResolvedValue('jwt-token-sample');
 
       const result = await authService.login({
-        email: 'nhat@example.com',
-        password: '123456',
+        email: '  NHAT@EXAMPLE.COM ',
+        password: 'password123',
       });
 
       expect(result.accessToken).toBe('jwt-token-sample');
@@ -107,7 +131,7 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException on invalid password', async () => {
-      const hashedPassword = await bcrypt.hash('123456', 10);
+      const hashedPassword = await bcrypt.hash('password123', 10);
       mockUserRepository.findOne.mockResolvedValue({
         ...mockUser,
         password: hashedPassword,
@@ -120,10 +144,21 @@ describe('AuthService', () => {
         }),
       ).rejects.toThrow(UnauthorizedException);
     });
+
+    it('should perform timing attack mitigation on non-existing user and throw UnauthorizedException', async () => {
+      mockUserRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        authService.login({
+          email: 'nonexistent@example.com',
+          password: 'password123',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
   });
 
   describe('logout', () => {
-    it('should store token in Redis blacklist', async () => {
+    it('should store token in Redis blacklist with ttl', async () => {
       mockJwtService.decode.mockReturnValue({
         sub: 1,
         email: 'nhat@example.com',
@@ -133,7 +168,7 @@ describe('AuthService', () => {
       const result = await authService.logout('jwt-token-sample');
 
       expect(mockRedisService.setBlacklistToken).toHaveBeenCalled();
-      expect(result.message).toBe('Đăng xuất thành công');
+      expect(result.message).toBe('auth.logout_success');
     });
   });
 });

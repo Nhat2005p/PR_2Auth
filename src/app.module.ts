@@ -11,15 +11,19 @@ import * as path from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
-import { dataSourceOptions } from './database/data-source';
+import { getDataSourceOptions } from './database/data-source';
 import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath:
+        process.env.NODE_ENV === 'test' ? ['.env.test', '.env'] : ['.env'],
     }),
-    TypeOrmModule.forRoot(dataSourceOptions),
+    TypeOrmModule.forRootAsync({
+      useFactory: () => getDataSourceOptions(),
+    }),
     I18nModule.forRoot({
       fallbackLanguage: 'en',
       loaderOptions: {
