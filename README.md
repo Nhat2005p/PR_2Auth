@@ -1,38 +1,43 @@
-# Pull 1 - init project với NestJS + 1 api hello world + setup i18n + setup swagger
+# Pull 2 - Setup Migrate Database Thủ Công & Handle Logic Authentication
 
-## 📌 Các nội dung đã thực hiện:
-- Khởi tạo project NestJS với kiến trúc module chuẩn.
-- Cấu hình global prefix `/api`.
-- Tích hợp Swagger Documentation tại `/api/docs`.
-- Tích hợp đa ngôn ngữ `nestjs-i18n` hỗ trợ Tiếng Anh (`/api/hello?lang=en`) và Tiếng Việt (`/api/hello?lang=vi`).
-- Thêm endpoint `GET /api/hello` trả về lời chào localized.
-- Cấu hình kiểm tra chuẩn code SunLint / Prettier.
+## Các nội dung đã thực hiện:
+- Cấu hình TypeORM và các script **migrate database thủ công** (`add`, `apply`, `revert`, `reset`).
+- Tạo migration tạo bảng `users` (`src/database/migrations/1700000000000-CreateUsersTable.ts`) và Entity `User` (`@Exclude()` cho cột `password`).
+- Tích hợp **Redis** (`ioredis`) để lưu trữ **blacklist token** khi người dùng đăng xuất.
+- Xây dựng đầy đủ luồng Authentication với JWT & Passport:
+  - `POST /api/auth/register`: Đăng ký tài khoản mới (hash password bằng `bcryptjs`).
+  - `POST /api/auth/login`: Đăng nhập và cấp phát `accessToken` (JWT).
+  - `POST /api/auth/logout`: Đăng xuất và đưa token hiện tại vào Redis blacklist (`blacklist:<token>`).
+  - `GET /api/auth/me`: Lấy thông tin người dùng hiện tại (Get Current User), kiểm tra JWT hợp lệ và không nằm trong Redis blacklist.
+- Cập nhật Swagger Bearer Auth tại `/api/docs`.
 
----
-
-## 📸 Kết quả kiểm thử:
-- `GET /api/hello` -> `Hello World!`
-- `GET /api/hello?lang=vi` -> `Xin chào thế giới!`
-- Truy cập `http://localhost:3000/api/docs` hiển thị giao diện Swagger UI.
-- `npm run lint` pass 100% (0 errors, 0 warnings).
-- `npm run build` thành công.
-- `npm test` & `npm run test:e2e` pass 100%.
-
----
-
-## 🛠️ Hướng dẫn cài đặt & chạy thử:
+## Các lệnh Migration Database thủ công:
 ```bash
-# Cài đặt dependencies
-npm install
+# 1. Add (tạo mới file migration thủ công)
+npm run migration:create -- src/database/migrations/TenMigration
 
-# Kiểm tra lint
-npm run lint
+# 2. Apply (chạy migration lên database)
+npm run migration:run
 
-# Build project
-npm run build
+# 3. Revert (hoàn tác migration gần nhất)
+npm run migration:revert
+
+# 4. Reset (xóa schema và chạy lại toàn bộ migration từ đầu)
+npm run migration:reset
+```
+
+## Chạy dự án & Kiểm thử:
+```bash
+# Chạy migration tạo bảng users
+npm run migration:run
 
 # Chạy server ở chế độ dev
 npm run start:dev
+
+# Kiểm tra code style (SunLint / Prettier)
+npm run lint
+
+# Chạy Unit Test & E2E Test
+npm test
+npm run test:e2e
 ```
-- Endpoint API: `http://localhost:3000/api/hello`
-- Swagger UI: `http://localhost:3000/api/docs`
